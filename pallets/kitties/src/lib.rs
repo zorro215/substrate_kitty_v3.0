@@ -15,6 +15,8 @@ use sp_runtime::{
 };
 use orml_utilities::with_transaction_result;
 use orml_nft::Module as NftModule;
+use byteorder::{ByteOrder, BigEndian};
+
 pub use weights::WeightInfo;
 
 #[cfg(feature = "std")]
@@ -67,10 +69,10 @@ pub trait Config: orml_nft::Config<TokenData = Kitty, ClassData = ()> + SendTran
 	type Currency: Currency<Self::AccountId>;
 	type WeightInfo: WeightInfo;
 
-		#[pallet::constant]
+	#[pallet::constant]
 	type DefaultDifficulty: Get<u32>;
 
-		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+	type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 	}
 
 	#[pallet::pallet]
@@ -84,8 +86,10 @@ pub trait Config: orml_nft::Config<TokenData = Kitty, ClassData = ()> + SendTran
 		#[pallet::weight(T::WeightInfo::create())]
 		pub(super) fn create(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			let sender = ensure_signed(origin)?;
-			
+
 			let dna = Self::random_value(&sender);
+			//十六进制转十进制
+			let dna_hash = BigEndian::read_u128(&dna[0..16]);
 
 			// Create and store kitty
 			let kitty = Kitty(dna);
