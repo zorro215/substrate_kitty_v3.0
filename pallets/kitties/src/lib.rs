@@ -91,6 +91,16 @@ pub mod pallet {
     pub type OwnedKitties<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, Vec<KittyIndexOf<T>>, ValueQuery>;
 
     #[pallet::storage]
+    #[pallet::getter(fn kitty_status)]
+    /// Get kitty sale status.
+    pub type KittyStatusMap<T: Config> = StorageMap<_, Blake2_128Concat, KittyIndexOf<T>, bool, ValueQuery>;
+
+    #[pallet::storage]
+    #[pallet::getter(fn kitty_sale_list)]
+    /// Get kitty sale list.
+    pub type KittySaleList<T: Config> = StorageValue<_, Vec<KittyIndexOf<T>>, ValueQuery>;
+
+    #[pallet::storage]
     #[pallet::getter(fn class_id)]
     /// The class id for orml_nft
     pub type ClassId<T: Config> = StorageValue<_, T::ClassId, ValueQuery>;
@@ -174,9 +184,30 @@ pub mod pallet {
                 }
             }
 
+            KittyStatusMap::<T>::insert(&kitty_id,false);
+
 
             // Emit event
             Self::deposit_event(crate::Event::KittyCreated(sender, kitty_id, kitty));
+
+            Ok(().into())
+        }
+
+        /// change  kitty status
+        #[pallet::weight(1000)]
+        pub(super) fn change_status(origin: OriginFor<T>, kitty_id: KittyIndexOf<T>) -> DispatchResultWithPostInfo {
+            let sender = ensure_signed(origin)?;
+
+            // 判断kitty_id 是不是当前用户的
+            // let kitty = NftModule::<T>::tokens(Self::class_id(), kitty_id).ok_or(Error::<T>::InvalidKittyId)?;
+
+            let kitty = Self::kitties(&sender, kitty_id).ok_or(Error::<T>::InvalidKittyId)?;
+
+            let kitty_status = !KittyStatusMap::<T>::get(&kitty_id);
+            KittyStatusMap::<T>::insert(&kitty_id,kitty_status);
+
+            // TODO Emit event
+            // Self::deposit_event(crate::Event::KittyCreated(sender, kitty_id, kitty));
 
             Ok(().into())
         }
