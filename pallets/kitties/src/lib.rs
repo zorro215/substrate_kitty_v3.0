@@ -1,36 +1,35 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use codec::{Encode, Decode};
-use frame_support::{ensure, traits::{Randomness, Currency, ExistenceRequirement, Get}, RuntimeDebug, dispatch::DispatchResult,
+use codec::{Decode, Encode};
+use frame_support::{dispatch::DispatchResult, ensure, RuntimeDebug, traits::{Currency, ExistenceRequirement, Get, Randomness},
 };
-use sp_io::hashing::blake2_128;
-use frame_system::offchain::{SendTransactionTypes, SubmitTransaction};
-use sp_std::{vec::Vec, convert::TryInto};
-use sp_runtime::{
-    transaction_validity::{
-        InvalidTransaction, TransactionSource, TransactionValidity, ValidTransaction,
-    },
-    offchain::storage_lock::{StorageLock, BlockAndTime},
-    RandomNumberGenerator, traits::BlakeTwo256,
-};
-use orml_utilities::with_transaction_result;
-use orml_nft::Module as NftModule;
-// use byteorder::{ByteOrder, BigEndian};
-
-pub use weights::WeightInfo;
-
-#[cfg(feature = "std")]
-use serde::{Serialize, Deserialize};
 #[cfg(feature = "std")]
 use frame_support::traits::GenesisBuild;
+use frame_system::offchain::{SendTransactionTypes, SubmitTransaction};
+use orml_nft::Module as NftModule;
+use orml_utilities::with_transaction_result;
+#[cfg(feature = "std")]
+use serde::{Deserialize, Serialize};
+use sp_io::hashing::blake2_128;
+use sp_runtime::{
+    offchain::storage_lock::{BlockAndTime, StorageLock},
+    RandomNumberGenerator,
+    traits::BlakeTwo256, transaction_validity::{
+        InvalidTransaction, TransactionSource, TransactionValidity, ValidTransaction,
+    },
+};
+use sp_std::{convert::TryInto, vec::Vec};
+
+pub use pallet::*;
+pub use weights::WeightInfo;
+
+// use byteorder::{ByteOrder, BigEndian};
 
 #[cfg(test)]
 mod tests;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 pub mod weights;
-
-pub use pallet::*;
 
 #[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
@@ -58,6 +57,8 @@ type KittyIndexOf<T> = <T as orml_nft::Config>::TokenId;
 pub mod pallet {
     use frame_support::pallet_prelude::*;
     use frame_system::pallet_prelude::*;
+    use sp_std::collections::btree_set::BTreeSet;
+
     use super::*;
 
     type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
@@ -88,17 +89,17 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::getter(fn owned_kitties)]
     /// Store owned kitties in a list.
-    pub type OwnedKitties<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, Vec<KittyIndexOf<T>>, ValueQuery>;
+    pub type OwnedKitties<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, BTreeSet<KittyIndexOf<T>>, ValueQuery>;
 
     #[pallet::storage]
     #[pallet::getter(fn kitty_status)]
     /// Get kitty sale status.
-    pub type KittyStatusMap<T: Config> = StorageMap<_, Blake2_128Concat, KittyIndexOf<T>, bool, ValueQuery>;
+    pub type KittyStatus<T: Config> = StorageMap<_, Blake2_128Concat, KittyIndexOf<T>, bool, ValueQuery>;
 
     #[pallet::storage]
     #[pallet::getter(fn kitty_sale_list)]
     /// Get kitty sale list.
-    pub type KittySaleList<T: Config> = StorageValue<_, Vec<KittyIndexOf<T>>, ValueQuery>;
+    pub type KittySaleList<T: Config> = StorageValue<_, BTreeSet<KittyIndexOf<T>>, ValueQuery>;
 
     #[pallet::storage]
     #[pallet::getter(fn class_id)]
@@ -174,17 +175,17 @@ pub mod pallet {
                 Ok(_) => {
                     //创建kitty的时候，不会有重复的kitty,如果转让，购买成够后要移除已有的kitty_id
                     let mut kitty_ids = members.unwrap();
-                    kitty_ids.push(kitty_id);
+                    kitty_ids.insert(kitty_id);
                     OwnedKitties::<T>::insert(&sender, kitty_ids);
                 }
                 Err(_) => {
-                    let mut kitty_ids: Vec<KittyIndexOf<T>> = Vec::new();
-                    kitty_ids.push(kitty_id);
+                    let mut kitty_ids: BTreeSet<KittyIndexOf<T>> = BTreeSet::new();
+                    kitty_ids.insert(kitty_id);
                     OwnedKitties::<T>::insert(&sender, kitty_ids);
                 }
             }
 
-            KittyStatusMap::<T>::insert(&kitty_id,false);
+            KittyStatus::<T>::insert(&kitty_id, false);
 
 
             // Emit event
@@ -201,10 +202,29 @@ pub mod pallet {
             // 判断kitty_id 是不是当前用户的
             // let kitty = NftModule::<T>::tokens(Self::class_id(), kitty_id).ok_or(Error::<T>::InvalidKittyId)?;
 
-            let kitty = Self::kitties(&sender, kitty_id).ok_or(Error::<T>::InvalidKittyId)?;
+            Self::kitties(&sender, kitty_id).ok_or(Error::<T>::InvalidKittyId)?;
 
-            let kitty_status = !KittyStatusMap::<T>::get(&kitty_id);
-            KittyStatusMap::<T>::insert(&kitty_id,kitty_status);
+            let kitty_status = !KittyStatus::<T>::get(&kitty_id);
+            KittyStatus::<T>::insert(&kitty_id, kitty_status);
+
+            //根据状态的不同，修改在售的sale-list
+            //TODO 使用闭包实现
+            if kitty_status {
+                let sale_list = KittySaleList::<T>::try_get();
+                match sale_list {
+                    Ok(mut list) => {
+                        if !list.contains(&kitty_id) {
+                            list.insert(kitty_id);
+                            KittySaleList::<T>::put(list);
+                        }
+                    }
+                    Err(_) => {
+                        let mut list = BTreeSet::new();
+                        list.insert(kitty_id);
+                        KittySaleList::<T>::put(list);
+                    }
+                }
+            }
 
             // TODO Emit event
             // Self::deposit_event(crate::Event::KittyCreated(sender, kitty_id, kitty));
