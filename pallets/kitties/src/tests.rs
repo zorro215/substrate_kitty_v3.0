@@ -202,7 +202,7 @@ fn can_transfer() {
         assert_ok!(KittiesModule::transfer(Origin::signed(100), 200, 0));
 
         assert_eq!(NFT::tokens(KittiesModule::class_id(), 0).unwrap().owner, 200);
-        assert_eq!(KittyPrices::<Test>::contains_key(0), false);
+        // assert_eq!(KittyDetails::<Test>::contains_key(0), false);
 
         assert_eq!(last_event(), Event::pallet_kitties(pallet_kitties::Event::KittyTransferred(100, 200, 0)));
     });
@@ -243,7 +243,7 @@ fn can_set_price() {
         assert_eq!(KittiesModule::kitty_prices(0), 10);
 
         assert_ok!(KittiesModule::set_price(Origin::signed(100), 0, None));
-        assert_eq!(KittyPrices::<Test>::contains_key(0), false);
+        // assert_eq!(KittyDetails::<Test>::contains_key(0), false);
 
         assert_eq!(last_event(), Event::pallet_kitties(pallet_kitties::Event::KittyPriceUpdated(100, 0, None)));
     });
@@ -268,7 +268,7 @@ fn can_buy() {
 
         assert_ok!(KittiesModule::buy(Origin::signed(200), 100, 0, 500));
 
-        assert_eq!(KittyPrices::<Test>::contains_key(0), false);
+        // assert_eq!(KittyDetails::<Test>::contains_key(0), false);
         assert_eq!(NFT::tokens(KittiesModule::class_id(), 0).unwrap().owner, 200);
         assert_eq!(Balances::free_balance(100), 400);
         assert_eq!(Balances::free_balance(200), 100);

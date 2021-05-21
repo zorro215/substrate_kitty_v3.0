@@ -21,12 +21,8 @@ use sp_runtime::{
     },
 };
 use sp_std::{convert::TryInto, vec::Vec};
-
 pub use pallet::*;
 pub use weights::WeightInfo;
-
-
-// use byteorder::{ByteOrder, BigEndian};
 
 #[cfg(test)]
 mod tests;
@@ -34,36 +30,13 @@ mod tests;
 mod benchmarking;
 pub mod weights;
 
+//**结构体定义**
+// Kitty对象作为NFT的元素
 #[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct Kitty(pub [u8; 16]);
 
-#[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-pub struct KittyDto<TokenId, Balance, Moment> {
-    id: TokenId,
-    dna: [u8; 16],
-    birthday: Moment,
-    saleStatus: bool,
-    price: Balance,
-    sex: KittyGender,
-}
-
-
-#[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq)]
-#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-pub enum KittyGender {
-    Male,
-    Female,
-}
-
-impl Default for KittyGender {
-    fn default() -> Self {
-        KittyGender::Male
-    }
-}
-
-
+// Kitty 公共方法定义
 impl Kitty {
     pub fn gender(&self) -> KittyGender {
         if self.0[0] % 2 == 0 {
@@ -74,17 +47,53 @@ impl Kitty {
     }
 }
 
+#[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+// 性别枚举
+pub enum KittyGender {
+    Male,
+    Female,
+}
+
+// 实现 Default 默认值trait
+impl Default for KittyGender {
+    fn default() -> Self {
+        KittyGender::Male
+    }
+}
+
+#[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+pub struct KittyDto<TokenId, Balance, Moment> {
+    id: TokenId,
+    dna: [u8; 16],
+    birthday: Moment,
+    sale_status: bool,
+    price: Balance,
+    sex: KittyGender,
+    // 后面再实现家庭关系
+    // father: [u8; 16],
+    // mather: [u8; 16],
+    // children: BTreeSet<[u8; 16]>,
+}
+
+
+//**泛型类型关联**
+// NFT-TokenId
 type KittyIndexOf<T> = <T as orml_nft::Config>::TokenId;
+// Kitty 创建时间 (birthday)
 type MomentOf<T> = <T as pallet_timestamp::Config>::Moment;
+// Kitty 售价
 type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+
 
 #[frame_support::pallet]
 pub mod pallet {
     use frame_support::pallet_prelude::*;
     use frame_system::pallet_prelude::*;
-    use sp_std::collections::btree_set::BTreeSet;
 
     use super::*;
+    use sp_runtime::sp_std::collections::btree_set::BTreeSet;
 
     #[pallet::pallet]
     #[pallet::generate_store(pub (super) trait Store)]
@@ -92,12 +101,14 @@ pub mod pallet {
 
     #[pallet::config]
     #[pallet::disable_frame_system_supertrait_check]
+    //实现nft和timestamp的config
     pub trait Config: orml_nft::Config<TokenData=Kitty, ClassData=()> + pallet_timestamp::Config + SendTransactionTypes<Call<Self>> {
         type Randomness: Randomness<Self::Hash>;
         type Currency: Currency<Self::AccountId>;
         type WeightInfo: WeightInfo;
 
         #[pallet::constant]
+        //难度系数
         type DefaultDifficulty: Get<u32>;
 
         type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
@@ -105,24 +116,27 @@ pub mod pallet {
 
 
     #[pallet::storage]
-    #[pallet::getter(fn kitty_prices)]
-    /// Get kitty price.
-    pub type KittyPrices<T: Config> = StorageMap<_, Blake2_128Concat, KittyIndexOf<T>, BalanceOf<T>, ValueQuery>;
+    #[pallet::getter(fn kitty_info)]
+    /// 根据TokenId获取kitty详情
+    pub type KittyInfos<T: Config> = StorageMap<_,
+        Blake2_128Concat,
+        KittyIndexOf<T>,
+        KittyDto<KittyIndexOf<T>, BalanceOf<T>, MomentOf<T>>,
+        ValueQuery>;
 
     #[pallet::storage]
     #[pallet::getter(fn owned_kitties)]
-    /// Store owned kitties in a list.
-    pub type OwnedKitties<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, BTreeSet<KittyIndexOf<T>>, ValueQuery>;
-
-    #[pallet::storage]
-    #[pallet::getter(fn kitty_status)]
-    /// Get kitty sale status.
-    pub type KittyStatus<T: Config> = StorageMap<_, Blake2_128Concat, KittyIndexOf<T>, bool, ValueQuery>;
+    /// 账户所拥有的Kitty集合list<TokenId>
+    pub type OwnedKitties<T: Config> = StorageMap<_,
+        Blake2_128Concat,
+        T::AccountId,
+        BTreeSet<KittyIndexOf<T>>,
+        ValueQuery>;
 
     #[pallet::storage]
     #[pallet::getter(fn kitty_sale_list)]
-    /// Get kitty sale list.
-    pub type KittySaleList<T: Config> = StorageValue<_, KittyDto<KittyIndexOf<T>, BalanceOf<T>, MomentOf<T>>, ValueQuery>;
+    /// 在售 kitty 集合 list<TokenId>.
+    pub type KittySaleList<T: Config> = StorageValue<_, BTreeSet<KittyIndexOf<T>>, ValueQuery>;
 
     #[pallet::storage]
     #[pallet::getter(fn class_id)]
@@ -144,28 +158,37 @@ pub mod pallet {
     #[pallet::generate_deposit(pub (super) fn deposit_event)]
     #[pallet::metadata(T::AccountId = "AccountId")]
     pub enum Event<T: Config> {
-        /// A kitty is created. \[owner, kitty_id, kitty\]
+        /// 一只新的kitty被创建. \[owner, kitty_id, kitty\]
         KittyCreated(T::AccountId, KittyIndexOf<T>, Kitty),
-        /// A new kitten is bred. \[owner, kitty_id, kitty\]
+        /// 一只新的 kitten 出生. \[owner, kitty_id, kitty\]
         KittyBred(T::AccountId, KittyIndexOf<T>, Kitty),
-        /// A kitty is transferred. \[from, to, kitty_id\]
+        /// 一只kitty被赠送. \[from, to, kitty_id\]
         KittyTransferred(T::AccountId, T::AccountId, KittyIndexOf<T>),
-        /// The price for a kitty is updated. \[owner, kitty_id, price\]
+        /// kitty价格更新. \[owner, kitty_id, price\]
         KittyPriceUpdated(T::AccountId, KittyIndexOf<T>, Option<BalanceOf<T>>),
-        /// A kitty is sold. \[old_owner, new_owner, kitty_id, price\]
+        /// 一只kitty售出. \[old_owner, new_owner, kitty_id, price\]
         KittySold(T::AccountId, T::AccountId, KittyIndexOf<T>, BalanceOf<T>),
     }
 
     #[pallet::error]
     pub enum Error<T> {
+        /// kittyId错误
         InvalidKittyId,
+        /// 性别相同
         SameGender,
+        /// 不是Kitty的主任
         NotOwner,
+        /// 不可出售状态
         NotForSale,
+        /// 价格太低
         PriceTooLow,
+        /// 无需购买自己的Kitty
         BuyFromSelf,
+        /// 难度系数溢出
         KittyDifficultyOverflow,
+        /// 拥有数量溢出
         KittyOverflow,
+        /// KittyId已经存在
         OwnedKittyId,
     }
 
@@ -178,48 +201,29 @@ pub mod pallet {
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
-        /// Create a new kitty
+        /// 创建一只  kitty NFT
         #[pallet::weight(< T as pallet::Config >::WeightInfo::create())]
         pub(super) fn create(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
             let sender = ensure_signed(origin)?;
-
             let dna = Self::random_value(&sender);
-            // //十六进制转十进制
-            // let dna_hash = BigEndian::read_u128(&dna[0..16]);
-
             // Create and store kitty
             let kitty = Kitty(dna);
-            let kitty_id = NftModule::<T>::mint(&sender, Self::class_id(), Vec::new(), kitty.clone())?;
-
-            //抽象一个私有方法出来
-            let members = OwnedKitties::<T>::try_get(&sender);
-
-            match members {
-                Ok(_) => {
-                    //创建kitty的时候，不会有重复的kitty,如果转让，购买成够后要移除已有的kitty_id
-                    let mut kitty_ids = members.unwrap();
-                    kitty_ids.insert(kitty_id);
-                    OwnedKitties::<T>::insert(&sender, kitty_ids);
-                }
-                Err(_) => {
-                    let mut kitty_ids: BTreeSet<KittyIndexOf<T>> = BTreeSet::new();
-                    kitty_ids.insert(kitty_id);
-                    OwnedKitties::<T>::insert(&sender, kitty_ids);
-                }
-            }
-
-            KittyStatus::<T>::insert(&kitty_id, false);
+            let kitty_id: KittyIndexOf<T> = NftModule::<T>::mint(&sender, Self::class_id(), Vec::new(), kitty.clone())?;
             // 从FRAME系统模块中获取当前区块高度 u32
             let current_block = <frame_system::Module<T>>::block_number();
             // 当前时间戳 u64
             let _now = <timestamp::Module<T>>::get();
 
-            let mut _dto = KittyDto::default();
-            _dto.id = kitty_id;
-            _dto.dna = dna;
-            _dto.sex = kitty.gender();
-            _dto.birthday = _now;
-            KittySaleList::<T>::put(_dto);
+            let mut kitty_dto: KittyDto<KittyIndexOf<T>, BalanceOf<T>, MomentOf<T>> = KittyDto::default();
+            kitty_dto.id = kitty_id;
+            kitty_dto.dna = dna;
+            kitty_dto.sex = kitty.gender();
+            kitty_dto.birthday = _now;
+            KittyInfos::<T>::insert(&kitty_id, kitty_dto);
+
+            let mut owned_kittys = BTreeSet::new();
+            owned_kittys.insert(kitty_id);
+            OwnedKitties::<T>::insert(&sender, owned_kittys);
 
 
             // Emit event
@@ -228,43 +232,6 @@ pub mod pallet {
             Ok(().into())
         }
 
-        /// change  kitty status
-        #[pallet::weight(1000)]
-        pub(super) fn change_status(origin: OriginFor<T>, kitty_id: KittyIndexOf<T>) -> DispatchResultWithPostInfo {
-            let sender = ensure_signed(origin)?;
-
-            // 判断kitty_id 是不是当前用户的
-            // let kitty = NftModule::<T>::tokens(Self::class_id(), kitty_id).ok_or(Error::<T>::InvalidKittyId)?;
-
-            Self::kitties(&sender, kitty_id).ok_or(Error::<T>::InvalidKittyId)?;
-
-            let kitty_status = !KittyStatus::<T>::get(&kitty_id);
-            KittyStatus::<T>::insert(&kitty_id, kitty_status);
-
-            //根据状态的不同，修改在售的sale-list
-            //TODO 使用闭包实现
-            // if kitty_status {
-            //     let sale_list = KittySaleList::<T>::try_get();
-            //     match sale_list {
-            //         Ok(mut list) => {
-            //             if !list.contains(&kitty_id) {
-            //                 list.insert(kitty_id);
-            //                 KittySaleList::<T>::put(list);
-            //             }
-            //         }
-            //         Err(_) => {
-            //             let mut list = BTreeSet::new();
-            //             list.insert(kitty_id);
-            //             KittySaleList::<T>::put(list);
-            //         }
-            //     }
-            // }
-
-            // TODO Emit event
-            // Self::deposit_event(crate::Event::KittyCreated(sender, kitty_id, kitty));
-
-            Ok(().into())
-        }
 
         /// Breed kitties
         #[pallet::weight(< T as pallet::Config >::WeightInfo::breed())]
@@ -279,7 +246,7 @@ pub mod pallet {
             Ok(().into())
         }
 
-        /// Transfer a kitty to new owner
+        /// 赠送 kitty其他人
         #[pallet::weight(< T as pallet::Config >::WeightInfo::transfer())]
         pub fn transfer(origin: OriginFor<T>, to: T::AccountId, kitty_id: KittyIndexOf<T>) -> DispatchResultWithPostInfo {
             let sender = ensure_signed(origin)?;
@@ -287,7 +254,7 @@ pub mod pallet {
             NftModule::<T>::transfer(&sender, &to, (Self::class_id(), kitty_id))?;
 
             if sender != to {
-                KittyPrices::<T>::remove(kitty_id);
+                KittyInfos::<T>::remove(kitty_id);
 
                 Self::deposit_event(Event::KittyTransferred(sender, to, kitty_id));
             }
@@ -295,7 +262,7 @@ pub mod pallet {
             Ok(().into())
         }
 
-        /// Set a price for a kitty for sale
+        /// 设置Kitty的价格，改为出售中，加入Kitty在售集合
         /// None to delist the kitty
         #[pallet::weight(< T as pallet::Config >::WeightInfo::set_price())]
         pub fn set_price(origin: OriginFor<T>, kitty_id: KittyIndexOf<T>, new_price: Option<BalanceOf<T>>) -> DispatchResultWithPostInfo {
@@ -303,30 +270,31 @@ pub mod pallet {
 
             ensure!(orml_nft::TokensByOwner::<T>::contains_key(&sender, (Self::class_id(), kitty_id)), Error::<T>::NotOwner);
 
-            KittyPrices::<T>::mutate_exists(kitty_id, |price| *price = new_price);
+            //TODO 1.加入在售列表 2.修改价格和Kitty_status
+            // KittyInfos::<T>::mutate_exists(kitty_id, |kittyDto| *kittyDto.price = new_price);
 
             Self::deposit_event(Event::KittyPriceUpdated(sender, kitty_id, new_price));
 
             Ok(().into())
         }
 
-        /// Buy a kitty
+        /// 购买Kitty 支付Kitty所需的Token
         #[pallet::weight(< T as pallet::Config >::WeightInfo::buy())]
         pub fn buy(origin: OriginFor<T>, owner: T::AccountId, kitty_id: KittyIndexOf<T>, max_price: BalanceOf<T>) -> DispatchResultWithPostInfo {
             let sender = ensure_signed(origin)?;
 
             ensure!(sender != owner, Error::<T>::BuyFromSelf);
 
-            KittyPrices::<T>::try_mutate_exists(kitty_id, |price| -> DispatchResult {
-                let price = price.take().ok_or(Error::<T>::NotForSale)?;
+            KittyInfos::<T>::try_mutate_exists(kitty_id, |kittyDto| -> DispatchResult {
+                let kittyDto = kittyDto.take().ok_or(Error::<T>::NotForSale)?;
 
-                ensure!(max_price >= price, Error::<T>::PriceTooLow);
+                ensure!(max_price >= kittyDto.price, Error::<T>::PriceTooLow);
 
                 with_transaction_result(|| {
                     NftModule::<T>::transfer(&owner, &sender, (Self::class_id(), kitty_id))?;
-                    T::Currency::transfer(&sender, &owner, price, ExistenceRequirement::KeepAlive)?;
+                    T::Currency::transfer(&sender, &owner, kittyDto.price, ExistenceRequirement::KeepAlive)?;
 
-                    Self::deposit_event(Event::KittySold(owner, sender, kitty_id, price));
+                    Self::deposit_event(Event::KittySold(owner, sender, kitty_id, kittyDto.price));
 
                     Ok(())
                 })
@@ -336,6 +304,7 @@ pub mod pallet {
         }
 
         #[pallet::weight(1000)]
+        /// 拥有两只异性Kitty，自动培育下一代
         pub fn auto_breed(origin: OriginFor<T>, kitty_id_1: KittyIndexOf<T>, kitty_id_2: KittyIndexOf<T>, _nonce: u32, _solution: u128) -> DispatchResultWithPostInfo {
             ensure_none(origin)?;
 
@@ -390,6 +359,8 @@ pub mod pallet {
     }
 }
 
+//××私有方法××
+/// 组合dna，dna可继承父母，也可能是变异
 fn combine_dna(dna1: u8, dna2: u8, selector: u8) -> u8 {
     (!selector & dna1) | (selector & dna2)
 }
@@ -405,6 +376,7 @@ impl<T: Config> Pallet<T> {
         })
     }
 
+    /// 生成随机hash
     fn random_value(sender: &T::AccountId) -> [u8; 16] {
         let payload = (
             T::Randomness::random_seed(),
@@ -414,6 +386,7 @@ impl<T: Config> Pallet<T> {
         payload.using_encoded(blake2_128)
     }
 
+    /// 培育下一代Kitty
     fn do_breed(
         owner: T::AccountId,
         kitty1: Kitty,
