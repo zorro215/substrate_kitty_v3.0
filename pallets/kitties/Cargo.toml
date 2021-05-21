@@ -17,6 +17,7 @@ sp-runtime = { version = "3.0.0", default-features = false }
 orml-nft = { version = "0.4.0", default-features = false }
 orml-utilities = { version = "0.4.0", default-features = false }
 byteorder = { version = "1.4.3", default-features = false }
+pallet-timestamp = { version = '3.0.0', default-features = false }
 
 frame-benchmarking = { version = "3.1.0", default-features = false, optional = true }
 
@@ -36,9 +37,10 @@ std = [
     "sp-runtime/std",
     "orml-nft/std",
     "orml-utilities/std",
+    'pallet-timestamp/std',
 ]
 runtime-benchmarks = [
-	"frame-benchmarking",
-	"frame-support/runtime-benchmarks",
-	"frame-system/runtime-benchmarks",
+    "frame-benchmarking",
+    "frame-support/runtime-benchmarks",
+    "frame-system/runtime-benchmarks",
 ]

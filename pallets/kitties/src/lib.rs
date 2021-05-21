@@ -8,6 +8,8 @@ use frame_support::traits::GenesisBuild;
 use frame_system::offchain::{SendTransactionTypes, SubmitTransaction};
 use orml_nft::Module as NftModule;
 use orml_utilities::with_transaction_result;
+use pallet_timestamp as timestamp;
+
 #[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
 use sp_io::hashing::blake2_128;
@@ -23,6 +25,7 @@ use sp_std::{convert::TryInto, vec::Vec};
 pub use pallet::*;
 pub use weights::WeightInfo;
 
+
 // use byteorder::{ByteOrder, BigEndian};
 
 #[cfg(test)]
@@ -35,11 +38,31 @@ pub mod weights;
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct Kitty(pub [u8; 16]);
 
-#[derive(Encode, Decode, Clone, Copy, RuntimeDebug, PartialEq, Eq)]
+#[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+pub struct KittyDto<TokenId, Balance, Moment> {
+    id: TokenId,
+    dna: [u8; 16],
+    birthday: Moment,
+    saleStatus: bool,
+    price: Balance,
+    sex: KittyGender,
+}
+
+
+#[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub enum KittyGender {
     Male,
     Female,
 }
+
+impl Default for KittyGender {
+    fn default() -> Self {
+        KittyGender::Male
+    }
+}
+
 
 impl Kitty {
     pub fn gender(&self) -> KittyGender {
@@ -52,6 +75,8 @@ impl Kitty {
 }
 
 type KittyIndexOf<T> = <T as orml_nft::Config>::TokenId;
+type MomentOf<T> = <T as pallet_timestamp::Config>::Moment;
+type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -61,15 +86,13 @@ pub mod pallet {
 
     use super::*;
 
-    type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
-
     #[pallet::pallet]
     #[pallet::generate_store(pub (super) trait Store)]
     pub struct Pallet<T>(_);
 
     #[pallet::config]
     #[pallet::disable_frame_system_supertrait_check]
-    pub trait Config: orml_nft::Config<TokenData=Kitty, ClassData=()> + SendTransactionTypes<Call<Self>> {
+    pub trait Config: orml_nft::Config<TokenData=Kitty, ClassData=()> + pallet_timestamp::Config + SendTransactionTypes<Call<Self>> {
         type Randomness: Randomness<Self::Hash>;
         type Currency: Currency<Self::AccountId>;
         type WeightInfo: WeightInfo;
@@ -99,7 +122,7 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::getter(fn kitty_sale_list)]
     /// Get kitty sale list.
-    pub type KittySaleList<T: Config> = StorageValue<_, BTreeSet<KittyIndexOf<T>>, ValueQuery>;
+    pub type KittySaleList<T: Config> = StorageValue<_, KittyDto<KittyIndexOf<T>, BalanceOf<T>, MomentOf<T>>, ValueQuery>;
 
     #[pallet::storage]
     #[pallet::getter(fn class_id)]
@@ -156,7 +179,7 @@ pub mod pallet {
     #[pallet::call]
     impl<T: Config> Pallet<T> {
         /// Create a new kitty
-        #[pallet::weight(T::WeightInfo::create())]
+        #[pallet::weight(< T as pallet::Config >::WeightInfo::create())]
         pub(super) fn create(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
             let sender = ensure_signed(origin)?;
 
@@ -186,6 +209,17 @@ pub mod pallet {
             }
 
             KittyStatus::<T>::insert(&kitty_id, false);
+            // 从FRAME系统模块中获取当前区块高度 u32
+            let current_block = <frame_system::Module<T>>::block_number();
+            // 当前时间戳 u64
+            let _now = <timestamp::Module<T>>::get();
+
+            let mut _dto = KittyDto::default();
+            _dto.id = kitty_id;
+            _dto.dna = dna;
+            _dto.sex = kitty.gender();
+            _dto.birthday = _now;
+            KittySaleList::<T>::put(_dto);
 
 
             // Emit event
@@ -209,22 +243,22 @@ pub mod pallet {
 
             //根据状态的不同，修改在售的sale-list
             //TODO 使用闭包实现
-            if kitty_status {
-                let sale_list = KittySaleList::<T>::try_get();
-                match sale_list {
-                    Ok(mut list) => {
-                        if !list.contains(&kitty_id) {
-                            list.insert(kitty_id);
-                            KittySaleList::<T>::put(list);
-                        }
-                    }
-                    Err(_) => {
-                        let mut list = BTreeSet::new();
-                        list.insert(kitty_id);
-                        KittySaleList::<T>::put(list);
-                    }
-                }
-            }
+            // if kitty_status {
+            //     let sale_list = KittySaleList::<T>::try_get();
+            //     match sale_list {
+            //         Ok(mut list) => {
+            //             if !list.contains(&kitty_id) {
+            //                 list.insert(kitty_id);
+            //                 KittySaleList::<T>::put(list);
+            //             }
+            //         }
+            //         Err(_) => {
+            //             let mut list = BTreeSet::new();
+            //             list.insert(kitty_id);
+            //             KittySaleList::<T>::put(list);
+            //         }
+            //     }
+            // }
 
             // TODO Emit event
             // Self::deposit_event(crate::Event::KittyCreated(sender, kitty_id, kitty));
@@ -233,7 +267,7 @@ pub mod pallet {
         }
 
         /// Breed kitties
-        #[pallet::weight(T::WeightInfo::breed())]
+        #[pallet::weight(< T as pallet::Config >::WeightInfo::breed())]
         pub(super) fn breed(origin: OriginFor<T>, kitty_id_1: KittyIndexOf<T>, kitty_id_2: KittyIndexOf<T>) -> DispatchResultWithPostInfo {
             let sender = ensure_signed(origin)?;
 
@@ -246,7 +280,7 @@ pub mod pallet {
         }
 
         /// Transfer a kitty to new owner
-        #[pallet::weight(T::WeightInfo::transfer())]
+        #[pallet::weight(< T as pallet::Config >::WeightInfo::transfer())]
         pub fn transfer(origin: OriginFor<T>, to: T::AccountId, kitty_id: KittyIndexOf<T>) -> DispatchResultWithPostInfo {
             let sender = ensure_signed(origin)?;
 
@@ -263,7 +297,7 @@ pub mod pallet {
 
         /// Set a price for a kitty for sale
         /// None to delist the kitty
-        #[pallet::weight(T::WeightInfo::set_price())]
+        #[pallet::weight(< T as pallet::Config >::WeightInfo::set_price())]
         pub fn set_price(origin: OriginFor<T>, kitty_id: KittyIndexOf<T>, new_price: Option<BalanceOf<T>>) -> DispatchResultWithPostInfo {
             let sender = ensure_signed(origin)?;
 
@@ -277,7 +311,7 @@ pub mod pallet {
         }
 
         /// Buy a kitty
-        #[pallet::weight(T::WeightInfo::buy())]
+        #[pallet::weight(< T as pallet::Config >::WeightInfo::buy())]
         pub fn buy(origin: OriginFor<T>, owner: T::AccountId, kitty_id: KittyIndexOf<T>, max_price: BalanceOf<T>) -> DispatchResultWithPostInfo {
             let sender = ensure_signed(origin)?;
 
