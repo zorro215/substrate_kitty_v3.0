@@ -31,12 +31,12 @@ mod benchmarking;
 pub mod weights;
 
 //**结构体定义**
-// Kitty对象作为NFT的元素
+/// Kitty对象作为NFT的元素
 #[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct Kitty(pub [u8; 16]);
 
-// Kitty 公共方法定义
+/// Kitty 公共方法定义
 impl Kitty {
     pub fn gender(&self) -> KittyGender {
         if self.0[0] % 2 == 0 {
@@ -49,13 +49,13 @@ impl Kitty {
 
 #[derive(Encode, Decode, Clone, RuntimeDebug, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-// 性别枚举
+/// 性别枚举
 pub enum KittyGender {
     Male,
     Female,
 }
 
-// 实现 Default 默认值trait
+/// 实现 Default 默认值trait
 impl Default for KittyGender {
     fn default() -> Self {
         KittyGender::Male
@@ -79,11 +79,11 @@ pub struct KittyDto<TokenId, Balance, Moment> {
 
 
 //**泛型类型关联**
-// NFT-TokenId
+/// NFT-TokenId
 type KittyIndexOf<T> = <T as orml_nft::Config>::TokenId;
-// Kitty 创建时间 (birthday)
+/// Kitty 创建时间 (birthday)
 type MomentOf<T> = <T as pallet_timestamp::Config>::Moment;
-// Kitty 售价
+/// Kitty 售价
 type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
 
@@ -165,7 +165,7 @@ pub mod pallet {
         /// 一只kitty被赠送. \[from, to, kitty_id\]
         KittyTransferred(T::AccountId, T::AccountId, KittyIndexOf<T>),
         /// kitty价格更新. \[owner, kitty_id, price\]
-        KittyPriceUpdated(T::AccountId, KittyIndexOf<T>, Option<BalanceOf<T>>),
+        KittyPriceUpdated(T::AccountId, KittyIndexOf<T>, BalanceOf<T>),
         /// 一只kitty售出. \[old_owner, new_owner, kitty_id, price\]
         KittySold(T::AccountId, T::AccountId, KittyIndexOf<T>, BalanceOf<T>),
     }
@@ -209,8 +209,8 @@ pub mod pallet {
             // Create and store kitty
             let kitty = Kitty(dna);
             let kitty_id: KittyIndexOf<T> = NftModule::<T>::mint(&sender, Self::class_id(), Vec::new(), kitty.clone())?;
-            // 从FRAME系统模块中获取当前区块高度 u32
-            let current_block = <frame_system::Module<T>>::block_number();
+            // 获取当前区块高度 u32
+            // let current_block = <frame_system::Module<T>>::block_number();
             // 当前时间戳 u64
             let _now = <timestamp::Module<T>>::get();
 
@@ -219,12 +219,15 @@ pub mod pallet {
             kitty_dto.dna = dna;
             kitty_dto.sex = kitty.gender();
             kitty_dto.birthday = _now;
+
             KittyInfos::<T>::insert(&kitty_id, kitty_dto);
 
-            let mut owned_kittys = BTreeSet::new();
-            owned_kittys.insert(kitty_id);
-            OwnedKitties::<T>::insert(&sender, owned_kittys);
-
+            let mut owned_kitty = BTreeSet::new();
+            if let Ok(list) = OwnedKitties::<T>::try_get(&sender) {
+                owned_kitty = list;
+            }
+            owned_kitty.insert(kitty_id);
+            OwnedKitties::<T>::insert(&sender, owned_kitty);
 
             // Emit event
             Self::deposit_event(crate::Event::KittyCreated(sender, kitty_id, kitty));
@@ -233,7 +236,7 @@ pub mod pallet {
         }
 
 
-        /// Breed kitties
+        /// 培育 kitties
         #[pallet::weight(< T as pallet::Config >::WeightInfo::breed())]
         pub(super) fn breed(origin: OriginFor<T>, kitty_id_1: KittyIndexOf<T>, kitty_id_2: KittyIndexOf<T>) -> DispatchResultWithPostInfo {
             let sender = ensure_signed(origin)?;
@@ -253,8 +256,10 @@ pub mod pallet {
 
             NftModule::<T>::transfer(&sender, &to, (Self::class_id(), kitty_id))?;
 
+
+            //TODO 1.在售的kitty，不能赠送  2.old-owned移除，new-owned 新增
             if sender != to {
-                KittyInfos::<T>::remove(kitty_id);
+                // KittyInfos::<T>::remove(kitty_id);
 
                 Self::deposit_event(Event::KittyTransferred(sender, to, kitty_id));
             }
@@ -262,16 +267,36 @@ pub mod pallet {
             Ok(().into())
         }
 
-        /// 设置Kitty的价格，改为出售中，加入Kitty在售集合
-        /// None to delist the kitty
+        /// 设置Kitty的价格，更改出售状态，加入Kitty在售集合
         #[pallet::weight(< T as pallet::Config >::WeightInfo::set_price())]
-        pub fn set_price(origin: OriginFor<T>, kitty_id: KittyIndexOf<T>, new_price: Option<BalanceOf<T>>) -> DispatchResultWithPostInfo {
+        pub fn set_price(origin: OriginFor<T>, kitty_id: KittyIndexOf<T>, new_price: BalanceOf<T>) -> DispatchResultWithPostInfo {
             let sender = ensure_signed(origin)?;
 
             ensure!(orml_nft::TokensByOwner::<T>::contains_key(&sender, (Self::class_id(), kitty_id)), Error::<T>::NotOwner);
 
-            //TODO 1.加入在售列表 2.修改价格和Kitty_status
-            // KittyInfos::<T>::mutate_exists(kitty_id, |kittyDto| *kittyDto.price = new_price);
+            // 1.加入在售列表 2.修改价格和Kitty_status
+            let sale_status = KittyInfos::<T>::try_mutate_exists(kitty_id, |kitty_dto| -> Result<bool, DispatchError> {
+                let info = kitty_dto.as_mut().ok_or(Error::<T>::InvalidKittyId)?;
+                info.price = new_price;
+                info.sale_status = !info.sale_status;
+                Ok(info.sale_status)
+            });
+
+            let mut sale_list = BTreeSet::new();
+            // 2.根据sale_status,操作在售Kitty集合
+            if let Ok(list) = KittySaleList::<T>::try_get() {
+                sale_list = list;
+            }
+            
+            if let Ok(status) = sale_status {
+                if status {
+                    sale_list.insert(kitty_id);
+                }else {
+                    sale_list.remove(&kitty_id);
+                }
+            }
+
+            KittySaleList::<T>::put(sale_list);
 
             Self::deposit_event(Event::KittyPriceUpdated(sender, kitty_id, new_price));
 
@@ -285,16 +310,16 @@ pub mod pallet {
 
             ensure!(sender != owner, Error::<T>::BuyFromSelf);
 
-            KittyInfos::<T>::try_mutate_exists(kitty_id, |kittyDto| -> DispatchResult {
-                let kittyDto = kittyDto.take().ok_or(Error::<T>::NotForSale)?;
+            KittyInfos::<T>::try_mutate_exists(kitty_id, |kitty_dto| -> DispatchResult {
+                let kitty_dto = kitty_dto.take().ok_or(Error::<T>::NotForSale)?;
 
-                ensure!(max_price >= kittyDto.price, Error::<T>::PriceTooLow);
+                ensure!(max_price >= kitty_dto.price, Error::<T>::PriceTooLow);
 
                 with_transaction_result(|| {
                     NftModule::<T>::transfer(&owner, &sender, (Self::class_id(), kitty_id))?;
-                    T::Currency::transfer(&sender, &owner, kittyDto.price, ExistenceRequirement::KeepAlive)?;
+                    T::Currency::transfer(&sender, &owner, kitty_dto.price, ExistenceRequirement::KeepAlive)?;
 
-                    Self::deposit_event(Event::KittySold(owner, sender, kitty_id, kittyDto.price));
+                    Self::deposit_event(Event::KittySold(owner, sender, kitty_id, kitty_dto.price));
 
                     Ok(())
                 })
