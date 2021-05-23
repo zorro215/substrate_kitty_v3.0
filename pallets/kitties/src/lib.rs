@@ -1,8 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use codec::{Decode, Encode};
-use frame_support::{dispatch::DispatchResult, ensure, RuntimeDebug, traits::{Currency, ExistenceRequirement, Get, Randomness},
-};
+use frame_support::{dispatch::DispatchResult, ensure, RuntimeDebug, traits::{Currency, ExistenceRequirement, Get, Randomness}, StorageMap};
 #[cfg(feature = "std")]
 use frame_support::traits::GenesisBuild;
 use frame_system::offchain::{SendTransactionTypes, SubmitTransaction};
@@ -71,10 +70,9 @@ pub struct KittyDto<TokenId, Balance, Moment> {
     sale_status: bool,
     price: Balance,
     sex: KittyGender,
-    // 后面再实现家庭关系
-    // father: [u8; 16],
-    // mather: [u8; 16],
-    // children: BTreeSet<[u8; 16]>,
+    //TODO  后面再实现家庭关系 用map看怎么配置开发者
+    // parent: StorageMap<u8,[u8; 16]>,
+    // child: StorageMap<TokenId,[u8; 16]>,
 }
 
 
@@ -210,7 +208,9 @@ pub mod pallet {
             let dna = Self::random_value(&sender);
             // Create and store kitty
             let kitty = Kitty(dna);
-            let kitty_id: KittyIndexOf<T> = NftModule::<T>::mint(&sender, Self::class_id(), Vec::new(), kitty.clone())?;
+            let mut  init_vec = Vec::new();
+            init_vec.push(0u8);
+            let kitty_id: KittyIndexOf<T> = NftModule::<T>::mint(&sender, Self::class_id(), init_vec, kitty.clone())?;
             // 获取当前区块高度 u32
             // let current_block = <frame_system::Module<T>>::block_number();
             // 当前时间戳 u64
