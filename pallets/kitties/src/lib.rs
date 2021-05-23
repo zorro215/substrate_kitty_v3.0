@@ -180,6 +180,8 @@ pub mod pallet {
         NotOwner,
         /// 不可出售状态
         NotForSale,
+        /// 出售中，不可赠送
+        NotForTransfer,
         /// 价格太低
         PriceTooLow,
         /// 无需购买自己的Kitty
@@ -254,8 +256,12 @@ pub mod pallet {
         pub fn transfer(origin: OriginFor<T>, to: T::AccountId, kitty_id: KittyIndexOf<T>) -> DispatchResultWithPostInfo {
             let sender = ensure_signed(origin)?;
 
-            NftModule::<T>::transfer(&sender, &to, (Self::class_id(), kitty_id))?;
+            let info = KittyInfos::<T>::try_get(kitty_id).unwrap();
 
+            //出售中的Kitty不可赠送
+            ensure!(info.sale_status, Error::<T>::NotForTransfer);
+
+            NftModule::<T>::transfer(&sender, &to, (Self::class_id(), kitty_id))?;
 
             //TODO 1.在售的kitty，不能赠送  2.old-owned移除，new-owned 新增
             if sender != to {
@@ -287,11 +293,11 @@ pub mod pallet {
             if let Ok(list) = KittySaleList::<T>::try_get() {
                 sale_list = list;
             }
-            
+
             if let Ok(status) = sale_status {
                 if status {
                     sale_list.insert(kitty_id);
-                }else {
+                } else {
                     sale_list.remove(&kitty_id);
                 }
             }
