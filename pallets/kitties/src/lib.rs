@@ -1,7 +1,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use codec::{Decode, Encode};
-use frame_support::{dispatch::DispatchResult, ensure, RuntimeDebug, traits::{Currency, ExistenceRequirement, Get, Randomness}, StorageMap};
+use frame_support::{dispatch::DispatchResult, ensure, RuntimeDebug, traits::{Currency, ExistenceRequirement, Get, Randomness}};
 #[cfg(feature = "std")]
 use frame_support::traits::GenesisBuild;
 use frame_system::offchain::{SendTransactionTypes, SubmitTransaction};
@@ -83,6 +83,8 @@ type KittyIndexOf<T> = <T as orml_nft::Config>::TokenId;
 type MomentOf<T> = <T as pallet_timestamp::Config>::Moment;
 /// Kitty 售价
 type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+/// KittyDTO info
+type KittyDtoOf<T> = KittyDto<KittyIndexOf<T>, BalanceOf<T>, MomentOf<T>>;
 
 
 #[frame_support::pallet]
@@ -119,7 +121,7 @@ pub mod pallet {
     pub type KittyInfos<T: Config> = StorageMap<_,
         Blake2_128Concat,
         KittyIndexOf<T>,
-        KittyDto<KittyIndexOf<T>, BalanceOf<T>, MomentOf<T>>,
+        KittyDtoOf<T>,
         ValueQuery>;
 
     #[pallet::storage]
@@ -208,7 +210,7 @@ pub mod pallet {
             let dna = Self::random_value(&sender);
             // Create and store kitty
             let kitty = Kitty(dna);
-            let mut  init_vec = Vec::new();
+            let mut init_vec = Vec::new();
             init_vec.push(0u8);
             let kitty_id: KittyIndexOf<T> = NftModule::<T>::mint(&sender, Self::class_id(), init_vec, kitty.clone())?;
             // 获取当前区块高度 u32
@@ -216,7 +218,7 @@ pub mod pallet {
             // 当前时间戳 u64
             let _now = <timestamp::Module<T>>::get();
 
-            let mut kitty_dto: KittyDto<KittyIndexOf<T>, BalanceOf<T>, MomentOf<T>> = KittyDto::default();
+            let mut kitty_dto: KittyDtoOf<T> = KittyDto::default();
             kitty_dto.id = kitty_id;
             kitty_dto.dna = dna;
             kitty_dto.sex = kitty.gender();
@@ -281,12 +283,12 @@ pub mod pallet {
             ensure!(orml_nft::TokensByOwner::<T>::contains_key(&sender, (Self::class_id(), kitty_id)), Error::<T>::NotOwner);
 
             // 1.加入在售列表 2.修改价格和Kitty_status
-            let sale_status = KittyInfos::<T>::try_mutate_exists(kitty_id, |kitty_dto| -> Result<bool, DispatchError> {
+            let kittyInfo = KittyInfos::<T>::try_mutate_exists(kitty_id, |kitty_dto| -> Result<&mut KittyDtoOf<T>, DispatchError> {
                 let info = kitty_dto.as_mut().ok_or(Error::<T>::InvalidKittyId)?;
                 info.price = new_price;
                 info.sale_status = !info.sale_status;
-                Ok(info.sale_status)
-            });
+                Ok(info)
+            })?;
 
             let mut sale_list = BTreeSet::new();
             // 2.根据sale_status,操作在售Kitty集合
