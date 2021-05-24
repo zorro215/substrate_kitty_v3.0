@@ -283,11 +283,12 @@ pub mod pallet {
             ensure!(orml_nft::TokensByOwner::<T>::contains_key(&sender, (Self::class_id(), kitty_id)), Error::<T>::NotOwner);
 
             // 1.加入在售列表 2.修改价格和Kitty_status
-            let kittyInfo = KittyInfos::<T>::try_mutate_exists(kitty_id, |kitty_dto| -> Result<&mut KittyDtoOf<T>, DispatchError> {
+            let sale_status = KittyInfos::<T>::try_mutate_exists(kitty_id, |kitty_dto| -> Result<bool, DispatchError> {
                 let info = kitty_dto.as_mut().ok_or(Error::<T>::InvalidKittyId)?;
                 info.price = new_price;
                 info.sale_status = !info.sale_status;
-                Ok(info)
+
+                Ok(info.sale_status)
             })?;
 
             let mut sale_list = BTreeSet::new();
@@ -296,12 +297,10 @@ pub mod pallet {
                 sale_list = list;
             }
 
-            if let Ok(status) = sale_status {
-                if status {
-                    sale_list.insert(kitty_id);
-                } else {
-                    sale_list.remove(&kitty_id);
-                }
+            if sale_status {
+                sale_list.insert(kitty_id);
+            } else {
+                sale_list.remove(&kitty_id);
             }
 
             KittySaleList::<T>::put(sale_list);
