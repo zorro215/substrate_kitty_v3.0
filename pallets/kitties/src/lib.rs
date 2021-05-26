@@ -260,14 +260,26 @@ pub mod pallet {
 
             let info = KittyInfos::<T>::try_get(kitty_id).unwrap();
 
-            //出售中的Kitty不可赠送
-            ensure!(info.sale_status, Error::<T>::NotForTransfer);
+            //1.出售中的Kitty不可赠送
+            ensure!(!info.sale_status, Error::<T>::NotForTransfer);
 
             NftModule::<T>::transfer(&sender, &to, (Self::class_id(), kitty_id))?;
 
-            //TODO 1.在售的kitty，不能赠送  2.old-owned移除，new-owned 新增
+            //抽私有方法 2.old-owned移除，new-owned 新增
             if sender != to {
-                // KittyInfos::<T>::remove(kitty_id);
+                if let Ok(mut list) = OwnedKitties::<T>::try_get(&sender) {
+                    list.remove(&kitty_id);
+                }
+
+                match OwnedKitties::<T>::try_get(&to) {
+                    Ok(mut list) => { list.insert(kitty_id); }
+                    Err(_) => {
+                        let mut list = BTreeSet::new();
+                        list.insert(kitty_id);
+                        OwnedKitties::<T>::insert(&to, list);
+                    }
+                }
+
 
                 Self::deposit_event(Event::KittyTransferred(sender, to, kitty_id));
             }
@@ -326,11 +338,27 @@ pub mod pallet {
                     NftModule::<T>::transfer(&owner, &sender, (Self::class_id(), kitty_id))?;
                     T::Currency::transfer(&sender, &owner, kitty_dto.price, ExistenceRequirement::KeepAlive)?;
 
+
+                    //TODO 抽离方法
+                    if let Ok(mut list) = OwnedKitties::<T>::try_get(&owner) {
+                        list.remove(&kitty_id);
+                    }
+
+                    match OwnedKitties::<T>::try_get(&sender) {
+                        Ok(mut list) => { list.insert(kitty_id); }
+                        Err(_) => {
+                            let mut list = BTreeSet::new();
+                            list.insert(kitty_id);
+                            OwnedKitties::<T>::insert(&sender, list);
+                        }
+                    }
+
                     Self::deposit_event(Event::KittySold(owner, sender, kitty_id, kitty_dto.price));
 
                     Ok(())
                 })
             })?;
+
 
             Ok(().into())
         }
