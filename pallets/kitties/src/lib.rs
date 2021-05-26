@@ -269,6 +269,7 @@ pub mod pallet {
             if sender != to {
                 if let Ok(mut list) = OwnedKitties::<T>::try_get(&sender) {
                     list.remove(&kitty_id);
+                    OwnedKitties::<T>::insert(&sender, list);
                 }
 
                 match OwnedKitties::<T>::try_get(&to) {
@@ -342,6 +343,7 @@ pub mod pallet {
                     //TODO 抽离方法
                     if let Ok(mut list) = OwnedKitties::<T>::try_get(&owner) {
                         list.remove(&kitty_id);
+                        OwnedKitties::<T>::insert(&sender, list);
                     }
 
                     match OwnedKitties::<T>::try_get(&sender) {
